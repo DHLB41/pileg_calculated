@@ -186,7 +186,7 @@ for dapil in df_suara["DAPIL"].tolist():
 # Konversi ke DataFrame
 df_kriteria1 = pd.DataFrame(kriteria1_dapil)
 
-# Bagian kalkulasi untuk Kriteria 2: Kursi = 1 & Kursi ke-2 terbawah adalah PAN/DEMOKRAT
+# Kriteria 2: Kursi = 1 & Kursi ke-2 terbawah adalah PAN/DEMOKRAT
 kriteria2_dapil = []
 
 for dapil in df_suara["DAPIL"].tolist():
@@ -205,20 +205,24 @@ for dapil in df_suara["DAPIL"].tolist():
     suara = int(suara_partai.get(selected_party, pd.Series([0])).values[0])
 
     if kursi != 1:
-        continue  # hanya untuk yang perolehannya = 1
+        continue
 
-    # Jalankan simulasi Sainte-Laguë
     urutan_kursi, _ = simulasi_sainte_lague(dapil, alokasi, df_suara, partai_terpilih)
     if len(urutan_kursi) < 2:
         continue
 
-    partai_k2 = urutan_kursi[-2]  # kursi ke-2 terakhir
-
+    partai_k2 = urutan_kursi[-2]
     if partai_k2 not in ["PAN", "DEMOKRAT"]:
-        continue  # hanya kalau kursi ke-2 terakhir adalah PAN atau DEMOKRAT
+        continue
 
     suara_k2 = int(suara_partai[partai_k2].values[0])
-    total_target_suara = int(suara_k2 * 3 * 1.1)  # naik 10% setelah dikali 3
+    total_target_suara = int(suara_k2 * 3 * 1.1)
+
+    # REVISI TARGET TAMBAHAN KURSI
+    if alokasi <= 4:
+        target_kursi = 1
+    else:
+        target_kursi = 1 + kursi
 
     kriteria2_dapil.append({
         "DAPIL": dapil,
@@ -226,16 +230,15 @@ for dapil in df_suara["DAPIL"].tolist():
         "ALOKASI_KURSI": alokasi,
         "SUARA_2024": suara,
         "KURSI_2024": kursi,
-        "TARGET_TAMBAHAN_KURSI": kursi + 1,
+        "TARGET_TAMBAHAN_KURSI": target_kursi,
         "PARTAI_K2_TERENDAH": partai_k2,
         "SUARA_K2": suara_k2,
         "TOTAL_TARGET_SUARA_2029": total_target_suara
     })
 
-# Konversi ke DataFrame
 df_kriteria2 = pd.DataFrame(kriteria2_dapil)
 
-# Bagian kalkulasi untuk Kriteria 3: Kursi = 1 (umum)
+# Kriteria 3: Kursi = 1 (umum)
 kriteria3_dapil = []
 
 for dapil in df_suara["DAPIL"].tolist():
@@ -254,16 +257,21 @@ for dapil in df_suara["DAPIL"].tolist():
     suara = int(suara_partai.get(selected_party, pd.Series([0])).values[0])
 
     if kursi != 1:
-        continue  # hanya untuk yang kursinya = 1
+        continue
 
-    # Jalankan simulasi Sainte-Laguë
     urutan_kursi, _ = simulasi_sainte_lague(dapil, alokasi, df_suara, partai_terpilih)
     if len(urutan_kursi) < 2:
         continue
 
-    partai_k2 = urutan_kursi[-2]  # kursi ke-2 terakhir
+    partai_k2 = urutan_kursi[-2]
     suara_k2 = int(suara_partai[partai_k2].values[0])
     total_target_suara = int(suara_k2 * 3 * 1.1)
+
+    # REVISI TARGET TAMBAHAN KURSI
+    if alokasi <= 4:
+        target_kursi = 1
+    else:
+        target_kursi = 1 + kursi
 
     kriteria3_dapil.append({
         "DAPIL": dapil,
@@ -271,13 +279,12 @@ for dapil in df_suara["DAPIL"].tolist():
         "ALOKASI_KURSI": alokasi,
         "SUARA_2024": suara,
         "KURSI_2024": kursi,
-        "TARGET_TAMBAHAN_KURSI": kursi + 1,
+        "TARGET_TAMBAHAN_KURSI": target_kursi,
         "PARTAI_K2_TERENDAH": partai_k2,
         "SUARA_K2": suara_k2,
         "TOTAL_TARGET_SUARA_2029": total_target_suara
     })
 
-# Konversi ke DataFrame
 df_kriteria3 = pd.DataFrame(kriteria3_dapil)
 
 # 1. Gabungkan seluruh df_kriteria1, df_kriteria2, df_kriteria3
@@ -503,6 +510,47 @@ else:
                 st.session_state.dapil_page += 1
 
     st.caption(f"Menampilkan dapil ke-{st.session_state.dapil_page + 1} dari {total_dapil}")
+
+# Pop-up hasil Sainte-Laguë di UI Dapil (dalam expander per dapil)
+urutan_kursi, hasil_akhir = simulasi_sainte_lague(dapil['DAPIL'], dapil['ALOKASI_KURSI'], df_suara, partai_terpilih)
+
+if urutan_kursi:
+    hasil_sl_detail = []
+    baris = df_suara[df_suara["DAPIL"] == dapil["DAPIL"]]
+    alokasi = dapil["ALOKASI_KURSI"]
+
+    for partai in partai_terpilih:
+        suara = int(baris[partai].values[0])
+        for pembagi in range(1, alokasi * 2, 2):
+            hasil_sl_detail.append({
+                "Partai": partai,
+                "Suara": suara,
+                "Pembagi": pembagi,
+                "Hasil Bagi": suara / pembagi
+            })
+
+    # Sort dan ambil kursi terbanyak
+    df_sl = pd.DataFrame(hasil_sl_detail).sort_values(by="Hasil Bagi", ascending=False).reset_index(drop=True)
+    df_sl["DAPIL"] = dapil["DAPIL"]
+    df_sl["ALOKASI KURSI"] = alokasi
+
+    # Tambahkan nomor kursi ke- untuk alokasi terbanyak
+    df_sl["KURSI KE-"] = ""
+    for i in range(min(alokasi, len(df_sl))):
+        df_sl.at[i, "KURSI KE-"] = i + 1
+
+    df_sl = df_sl[["DAPIL", "ALOKASI KURSI", "KURSI KE-", "Partai", "Suara", "Pembagi"]]
+
+    # Format angka
+    df_sl["Suara"] = df_sl["Suara"].apply(lambda x: f"{x:,}".replace(",", "."))
+    df_sl["Pembagi"] = df_sl["Pembagi"].astype(int)
+
+    with st.expander("📊 Lihat Detail Hasil Sainte-Laguë"):
+        st.markdown("##### Tabel Pembagian Kursi Berdasarkan Metode Sainte-Laguë")
+        st.markdown(
+            f'<div class="scrollable-table">{df_sl.to_html(index=False, classes="centered-table", escape=False)}</div>',
+            unsafe_allow_html=True
+        )
 
 st.markdown("<br>", unsafe_allow_html=True)  # Spasi vertikal
 st.markdown("<br>", unsafe_allow_html=True)  # Spasi vertikal
