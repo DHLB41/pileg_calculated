@@ -447,22 +447,27 @@ else:
 
     st.markdown(f"### DAPIL: **{dapil['DAPIL']}**")
 
+    # Tambahkan key dinamis agar tidak error
+    idx = st.session_state.dapil_page
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.text_input("Alokasi Kursi", value=format_ribuan(dapil['ALOKASI_KURSI']), disabled=False)
+        st.text_input("Alokasi Kursi", value=format_ribuan(dapil['ALOKASI_KURSI']), disabled=True, key=f"alokasi_kursi_{idx}")
     with col2:
-        st.text_input("Perolehan Suara Pemilu 2024", value=f"{dapil['SUARA_2024']:,}".replace(",", "."), disabled=False)
+        st.text_input("Perolehan Suara Pemilu 2024", value=format_ribuan(dapil['SUARA_2024']), disabled=True, key=f"suara_2024_{idx}")
     with col3:
-        st.text_input("Perolehan Kursi Pemilu 2024", value=format_ribuan(dapil['KURSI_2024']), disabled=False)
+        st.text_input("Perolehan Kursi Pemilu 2024", value=format_ribuan(dapil['KURSI_2024']), disabled=True, key=f"kursi_2024_{idx}")
 
     col4, col5, col6 = st.columns(3)
     with col4:
-        st.text_input("Target Tambahan Kursi 2029", value=format_ribuan(dapil['TARGET_TAMBAHAN_KURSI']), disabled=False)
+        st.text_input("Target Tambahan Kursi 2029", value=format_ribuan(dapil['TARGET_TAMBAHAN_KURSI']), disabled=True, key=f"target_kursi_{idx}")
     with col5:
-        st.text_input("Total Target Suara 2029", value=f"{dapil['TOTAL_TARGET_SUARA_2029']:,}".replace(",", "."), disabled=False)
+        st.text_input("Total Target Suara 2029", value=format_ribuan(dapil['TOTAL_TARGET_SUARA_2029']), disabled=True, key=f"target_suara_{idx}")
     with col6:
-        st.text_input("Partai Kursi Ke-2 Terbawah", value=f"{dapil['PARTAI_K2_TERENDAH']} ({dapil['SUARA_K2']:,} suara)".replace(",", "."), disabled=False)
-
+        st.text_input("Partai Kursi Ke-2 Terbawah",
+                      value=f"{dapil['PARTAI_K2_TERENDAH']} ({format_ribuan(dapil['SUARA_K2'])} suara)",
+                      disabled=True,
+                      key=f"partai_k2_{idx}")
     # Tabel distribusi SP per kursi (per dapil)
     st.markdown("#### Tabel Distribusi SP per Kursi")
 
