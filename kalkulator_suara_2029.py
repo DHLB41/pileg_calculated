@@ -549,14 +549,29 @@ else:
         biaya_pendampingan = st.number_input("Biaya Pendampingan", min_value=0, value=0, step=100000, format="%d")
 
     # Hitung total RAB per kursi hanya jika SP tidak nol
-    rab_numerik = [int(r.replace(".", "")) for r in df_rab.iloc[0]]
+    try:
+        rab_numerik = [int(str(r).replace(".", "")) for r in df_rab.iloc[0]]
+    except Exception as e:
+        st.error(f"Gagal menghitung RAB: {e}")
+        rab_numerik = [0, 0, 0, 0]
+
     total_rab_kursi = [rab + biaya_manajemen + biaya_pendampingan if rab > 0 else 0 for rab in rab_numerik]
     total_rab_all = sum(total_rab_kursi)
 
-    df_total_rab = pd.DataFrame([total_rab_kursi + [total_rab_all]],
-        columns=["Total RAB Kursi 1", "Total RAB Kursi 2", "Total RAB Kursi 3", "Total RAB Kursi 4", "TOTAL RAB"])
+    # Simpan ke df_terpilih agar bisa direkap di bagian Rangkuman
+    if "TOTAL_RAB" not in df_terpilih.columns:
+        df_terpilih["TOTAL_RAB"] = 0  # inisialisasi kolom jika belum ada
+
+    df_terpilih.at[st.session_state.dapil_page, "TOTAL_RAB"] = total_rab_all
+
+    # Tampilkan tabel
+    df_total_rab = pd.DataFrame(
+        [total_rab_kursi + [total_rab_all]],
+        columns=["Total RAB Kursi 1", "Total RAB Kursi 2", "Total RAB Kursi 3", "Total RAB Kursi 4", "TOTAL RAB"]
+    )
+
     for col in df_total_rab.columns:
-        df_total_rab[col] = df_total_rab[col].apply(lambda x: f"{x:,}".replace(",", "."))
+        df_total_rab[col] = df_total_rab[col].apply(lambda x: f"{int(x):,}".replace(",", "."))
 
     st.markdown("#### Total RAB (SP + Manajemen + Pendampingan)")
     st.markdown(
@@ -625,37 +640,54 @@ st.markdown("<br>", unsafe_allow_html=True)  # Spasi vertikal
 # === PART 5: RANGKUMAN PERHITUNGAN AKHIR ===
 st.header("5. Rangkuman Hasil Akhir Kalkulasi")
 
-# Ringkasan Angka Total
-col1, col2, col3 = st.columns(3)
-with col1:
-    total_suara_2029 = df_terpilih['TOTAL_TARGET_SUARA_2029'].sum()
-    st.metric("Total Target Suara 2029", f"{int(total_suara_2029):,}".replace(",", "."))
+# === Hitung TOTAL RAB untuk semua DAPIL (bukan hanya yang sedang tampil) ===
+if "TOTAL_RAB" not in df_terpilih.columns:
+    df_terpilih["TOTAL_RAB"] = 0
 
-with col2:
-    total_kursi_2029 = df_terpilih['TARGET_TAMBAHAN_KURSI'].sum()
-    st.metric("Target Kursi 2029", int(total_kursi_2029))
-
-with col3:
-    total_rab = df_terpilih["TOTAL_RAB"].sum() if "TOTAL_RAB" in df_terpilih.columns else 0
-    st.metric("Total RAB (Rp)", f"{int(total_rab):,}".replace(",", "."))
-
-st.markdown("---")
-st.subheader("Tabel Rangkuman Persebaran Dapil Potensial")
+for idx, row in df_terpilih.iterrows():
+    rab_kursi = 0
+    for i in range(1, 5):
+        sp_val = row.get(f"SP_KURSI_{i}", 0)
+        rab_val = int(sp_val * angka_psikologis)
+        if rab_val > 0:
+            rab_kursi += rab_val + biaya_manajemen + biaya_pendampingan
+    df_terpilih.at[idx, "TOTAL_RAB"] = rab_kursi
 
 # Siapkan data untuk tabel rangkuman dapil potensial
 df_summary_display = df_terpilih[[
     "DAPIL", "ALOKASI_KURSI", "SUARA_2024", "KURSI_2024",
-    "TARGET_TAMBAHAN_KURSI", "TOTAL_TARGET_SUARA_2029"
+    "TARGET_TAMBAHAN_KURSI", "TOTAL_TARGET_SUARA_2029", "TOTAL_RAB"
 ]].copy()
 
 df_summary_display.columns = [
     "DAPIL", "Alokasi Kursi", "Suara 2024", "Kursi 2024",
-    "Target Kursi 2029", "Target Suara 2029"
+    "Target Kursi 2029", "Target Suara 2029", "Total RAB"
 ]
 
 # Format angka
-for col in ["Suara 2024", "Target Suara 2029"]:
+for col in ["Suara 2024", "Target Suara 2029", "Total RAB"]:
     df_summary_display[col] = df_summary_display[col].apply(lambda x: f"{int(x):,}".replace(",", "."))
+
+# Konversi Total RAB ke integer tanpa titik untuk kalkulasi total
+df_summary_display["TOTAL_RAB_INT"] = df_summary_display["Total RAB"].str.replace(".", "", regex=False).astype(int)
+
+# Hitung total agregat
+total_suara_2029 = df_terpilih['TOTAL_TARGET_SUARA_2029'].sum()
+total_kursi_2029 = df_terpilih['TARGET_TAMBAHAN_KURSI'].sum()
+total_rab = df_summary_display["TOTAL_RAB_INT"].sum()
+
+# Tampilkan metrik utama
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Target Suara 2029", f"{int(total_suara_2029):,}".replace(",", "."))
+with col2:
+    st.metric("Target Kursi 2029", int(total_kursi_2029))
+with col3:
+    total_rab = df_terpilih["TOTAL_RAB"].sum()
+    st.metric("Total RAB (Rp)", f"{int(total_rab):,}".replace(",", "."))
+
+st.markdown("---")
+st.subheader("📍 Tabel Rangkuman Persebaran Dapil Potensial")
 
 # Pagination
 per_page = 10
@@ -664,7 +696,7 @@ if "summary_page" not in st.session_state:
     st.session_state.summary_page = 1
 start_idx = (st.session_state.summary_page - 1) * per_page
 end_idx = start_idx + per_page
-df_page = df_summary_display.iloc[start_idx:end_idx]
+df_page = df_summary_display.iloc[start_idx:end_idx].drop(columns=["TOTAL_RAB_INT"])
 
 # Tabel HTML + CSS
 st.markdown("""
