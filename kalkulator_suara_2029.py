@@ -10,6 +10,12 @@ df_suara = pd.read_excel(file_path, sheet_name="perolehan_suara")
 df_kursi = pd.read_excel(file_path, sheet_name="hasil_sl")
 df_dapil = pd.read_excel(file_path, sheet_name="dapil")
 
+def format_ribuan(x):
+    try:
+        return f"{int(x):,}".replace(",", ".")
+    except:
+        return x
+
 # Daftar partai yang lolos
 partai_terpilih = ["PKB", "GERINDRA", "PDIP", "GOLKAR", "NASDEM", "PKS", "PAN", "DEMOKRAT"]
 
@@ -22,12 +28,17 @@ def get_total_kursi(partai):
 
 # Fungsi Sainte-Lague
 def simulasi_sainte_lague(dapil_nama, alokasi_kursi, df_suara, partai_lolos):
+    alokasi_kursi = int(alokasi_kursi)  # ⬅️ Perbaikan WAJIB
     baris = df_suara[df_suara["DAPIL"] == dapil_nama]
     if baris.empty:
         return [], {}
     hasil_bagi = []
     for partai in partai_lolos:
-        suara = int(baris[partai].values[0])
+        try:
+            suara = int(baris[partai].values[0])
+        except (KeyError, ValueError, TypeError):
+            continue  # skip partai tidak valid
+        alokasi_kursi = int(alokasi_kursi)
         for pembagi in range(1, alokasi_kursi * 2, 2):
             hasil_bagi.append((partai, suara / pembagi))
     hasil_bagi.sort(key=lambda x: x[1], reverse=True)
@@ -162,7 +173,12 @@ for dapil in df_suara["DAPIL"].tolist():
         continue  # hanya ambil dapil dengan perolehan kursi = 0
 
     # Jalankan simulasi Sainte-Laguë
-    urutan_kursi, _ = simulasi_sainte_lague(dapil, alokasi, df_suara, partai_terpilih)
+    partai_lolos = partai_terpilih.copy()
+    if selected_party not in partai_lolos:
+        partai_lolos.append(selected_party)
+
+    urutan_kursi, _ = simulasi_sainte_lague(dapil, alokasi, df_suara, partai_lolos)
+
     if len(urutan_kursi) < 2:
         continue
 
@@ -287,12 +303,57 @@ for dapil in df_suara["DAPIL"].tolist():
 
 df_kriteria3 = pd.DataFrame(kriteria3_dapil)
 
-# 1. Gabungkan seluruh df_kriteria1, df_kriteria2, df_kriteria3
-for df_k, k in zip([df_kriteria1, df_kriteria2, df_kriteria3], [1, 2, 3]):
+# Bagian kalkulasi untuk Kriteria 4: Kursi > 1 (Target Kursi 2029 = Kursi 2024)
+kriteria4_dapil = []
+
+for dapil in df_suara["DAPIL"].tolist():
+    alokasi_row = df_dapil[df_dapil["DAPIL"] == dapil]
+    if alokasi_row.empty:
+        continue
+
+    alokasi = int(alokasi_row["ALOKASI KURSI"].values[0])
+    kursi_partai = df_kursi[df_kursi["DAPIL"] == dapil]
+    suara_partai = df_suara[df_suara["DAPIL"] == dapil]
+
+    if kursi_partai.empty or suara_partai.empty:
+        continue
+
+    kursi = int(kursi_partai.get(selected_party, pd.Series([0])).values[0])
+    suara = int(suara_partai.get(selected_party, pd.Series([0])).values[0])
+
+    if kursi <= 1:
+        continue  # hanya untuk dapil dengan kursi > 1
+
+    # Ambil partai ke-2 terakhir dari simulasi Sainte-Laguë
+    urutan_kursi, _ = simulasi_sainte_lague(dapil, alokasi, df_suara, partai_terpilih)
+    if len(urutan_kursi) < 2:
+        continue
+
+    partai_k2 = urutan_kursi[-2]
+    suara_k2 = int(suara_partai[partai_k2].values[0])
+    total_target_suara = int(suara_k2 * 3 * 1.1)
+
+    kriteria4_dapil.append({
+        "DAPIL": dapil,
+        "PARTAI": selected_party,
+        "ALOKASI_KURSI": alokasi,
+        "SUARA_2024": suara,
+        "KURSI_2024": kursi,
+        "TARGET_TAMBAHAN_KURSI": kursi,  # Target sama dengan jumlah kursi 2024
+        "PARTAI_K2_TERENDAH": partai_k2,
+        "SUARA_K2": suara_k2,
+        "TOTAL_TARGET_SUARA_2029": total_target_suara
+    })
+
+df_kriteria4 = pd.DataFrame(kriteria4_dapil)
+df_kriteria4["KRITERIA"] = 4
+
+# 1. Gabungkan seluruh df_kriteria1, df_kriteria2, df_kriteria3, df_kriteria4
+for df_k, k in zip([df_kriteria1, df_kriteria2, df_kriteria3, df_kriteria4], [1, 2, 3, 4]):
     df_k["KRITERIA"] = k
 
 # Gabungkan dan urutkan
-df_all_kriteria = pd.concat([df_kriteria1, df_kriteria2, df_kriteria3], ignore_index=True)
+df_all_kriteria = pd.concat([df_kriteria1, df_kriteria2, df_kriteria3, df_kriteria4], ignore_index=True)
 df_all_kriteria = df_all_kriteria.sort_values(by="TOTAL_TARGET_SUARA_2029", ascending=True)
 
 # Hapus duplikat berdasarkan DAPIL → prioritas kriteria terendah
@@ -388,7 +449,7 @@ else:
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.text_input("Alokasi Kursi", value=str(dapil['ALOKASI_KURSI']), disabled=False)
+        st.text_input("Alokasi Kursi", value=format_ribuan(dapil['ALOKASI_KURSI']), disabled=False)
     with col2:
         st.text_input("Perolehan Suara Pemilu 2024", value=f"{dapil['SUARA_2024']:,}".replace(",", "."), disabled=False)
     with col3:
@@ -521,6 +582,7 @@ if urutan_kursi:
 
     for partai in partai_terpilih:
         suara = int(baris[partai].values[0])
+        alokasi = int(alokasi)
         for pembagi in range(1, alokasi * 2, 2):
             hasil_sl_detail.append({
                 "Partai": partai,
