@@ -143,14 +143,14 @@ for row in rows:
             key = f"proporsi_{row}_{idx+1}"
             kursi_input[key] = st.number_input(label=kursi_labels[idx], key=key, min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
 
-st.subheader("Faktor Pengurang dan Target Suara")
-col1, col2, col3 = st.columns(3)
-with col1:
-    kehilangan_2024 = st.number_input("Potensi Kehilangan Suara 2029 (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
-with col2:
-    kehilangan_sp = st.number_input("Potensi Kehilangan SP (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
-with col3:
-    target_suara_2029 = st.number_input("Proporsi Target Suara 2029 (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
+with st.expander("Faktor Pengurang dan Target Suara", expanded=False):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        kehilangan_2024 = st.number_input("Potensi Kehilangan Suara 2029 (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
+    with col2:
+        kehilangan_sp = st.number_input("Potensi Kehilangan SP (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
+    with col3:
+        target_suara_2029 = st.number_input("Proporsi Target Suara 2029 (%)", min_value=0.0, max_value=200.0, step=1.0, format="%.2f")
 
 kriteria1_dapil = []
 
@@ -453,11 +453,11 @@ else:
     with col2:
         st.text_input("Perolehan Suara Pemilu 2024", value=f"{dapil['SUARA_2024']:,}".replace(",", "."), disabled=False)
     with col3:
-        st.text_input("Perolehan Kursi Pemilu 2024", value=str(dapil['KURSI_2024']), disabled=False)
+        st.text_input("Perolehan Kursi Pemilu 2024", value=format_ribuan(dapil['KURSI_2024']), disabled=False)
 
     col4, col5, col6 = st.columns(3)
     with col4:
-        st.text_input("Target Tambahan Kursi 2029", value=str(dapil['TARGET_TAMBAHAN_KURSI']), disabled=False)
+        st.text_input("Target Tambahan Kursi 2029", value=format_ribuan(dapil['TARGET_TAMBAHAN_KURSI']), disabled=False)
     with col5:
         st.text_input("Total Target Suara 2029", value=f"{dapil['TOTAL_TARGET_SUARA_2029']:,}".replace(",", "."), disabled=False)
     with col6:
@@ -635,7 +635,7 @@ with col3:
     st.metric("Total RAB (Rp)", f"{int(total_rab):,}".replace(",", "."))
 
 st.markdown("---")
-st.subheader("📍 Tabel Rangkuman Persebaran Dapil Potensial")
+st.subheader("Tabel Rangkuman Persebaran Dapil Potensial")
 
 # Siapkan data untuk tabel rangkuman dapil potensial
 df_summary_display = df_terpilih[[
