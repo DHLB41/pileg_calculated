@@ -5,6 +5,7 @@ from pathlib import Path
 from jinja2 import Template
 import tempfile
 import base64
+import re
 
 # Konfigurasi halaman
 st.set_page_config(page_title="Kalkulator Kebutuhan Suara Pemilu 2029", layout="wide")
@@ -632,7 +633,7 @@ if urutan_kursi:
     df_sl["Suara"] = df_sl["Suara"].apply(lambda x: f"{x:,}".replace(",", "."))
     df_sl["Pembagi"] = df_sl["Pembagi"].astype(int)
 
-    with st.expander("📊 Lihat Detail Hasil Sainte-Laguë"):
+    with st.expander("Lihat Detail Hasil Sainte-Laguë"):
         st.markdown("##### Tabel Pembagian Kursi Berdasarkan Metode Sainte-Laguë")
         st.markdown(
             f'<div class="scrollable-table">{df_sl.to_html(index=False, classes="centered-table", escape=False)}</div>',
@@ -730,19 +731,36 @@ with col_next:
             st.session_state.summary_page += 1
 
 
-# === PART 6: UNDUH PDF RANGKUMAN HASIL ===
-st.markdown("### Unduh Ringkasan Hasil Kalkulasi")
+# Konversi angka romawi ke integer
+def roman_to_int(roman):
+    roman_dict = {
+        "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5,
+        "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10,
+        "XI": 11, "XII": 12, "XIII": 13, "XIV": 14, "XV": 15,
+        "XVI": 16, "XVII": 17, "XVIII": 18, "XIX": 19, "XX": 20
+    }
+    return roman_dict.get(roman.strip().upper(), 0)
 
-def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024):
+def extract_roman_order(dapil_name):
+    match = re.search(r"(I{1,3}|IV|V|VI{0,3}|IX|X|XI{0,3}|XIV|XV|XVI|XVII|XVIII|XIX|XX)$", dapil_name.strip(), re.IGNORECASE)
+    if match:
+        return roman_to_int(match.group())
+    return 0
+
+def export_to_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024):
     df = df_terpilih.copy()
 
+    # Format dan persiapan kolom
     df["Total RAB"] = df["TOTAL_RAB"].fillna(0).apply(format_ribuan)
     df["Target Suara 2029"] = df["TOTAL_TARGET_SUARA_2029"].fillna(0).apply(format_ribuan)
     df["Suara 2024"] = df["SUARA_2024"].fillna(0).apply(format_ribuan)
     df["Target Kursi 2029"] = df["TARGET_TAMBAHAN_KURSI"].fillna(0).astype(int)
 
-    # Gabungkan kolom GUGUSAN & PROPINSI dari sheet dapil
-    df = df.merge(df_dapil[["DAPIL", "GUGUSAN", "PROPINSI"]], on="DAPIL", how="left")
+    # Gabungkan kolom bantu dari df_dapil (untuk ambil PROPINSI dan GUGUSAN)
+    df = df.merge(df_dapil[["DAPIL", "PROPINSI"]], on="DAPIL", how="left")
+    df["ROMAWI_ORDER"] = df["DAPIL"].apply(extract_roman_order)
+
+    grouped = df.groupby("PROPINSI")
 
     total_suara = format_ribuan(df["TOTAL_TARGET_SUARA_2029"].sum())
     total_kursi = int(df["TARGET_TAMBAHAN_KURSI"].sum())
@@ -751,10 +769,10 @@ def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seat
     kursi_2024 = format_ribuan(seats_2024)
 
     rows_html = ""
-    for _, group_df in df.groupby(["GUGUSAN", "PROPINSI"]):
-        prop = group_df["PROPINSI"].iloc[0]
-        rows_html += f"<tr><th colspan='7' class='propinsi-header'>{prop}</th></tr>"
-        for _, row in group_df.iterrows():
+    for propinsi, sub_df in grouped:
+        sorted_df = sub_df.sort_values(by="ROMAWI_ORDER")
+        rows_html += f"<tr><th colspan='7' class='propinsi-header'>{propinsi}</th></tr>"
+        for _, row in sorted_df.iterrows():
             rows_html += f"""
             <tr>
                 <td>{row['DAPIL']}</td>
@@ -778,6 +796,7 @@ def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seat
                 font-family: 'Segoe UI', sans-serif;
                 padding: 40px;
                 color: #222;
+                background-color: #fff;
             }}
             h1 {{
                 font-size: 24px;
@@ -787,18 +806,15 @@ def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seat
                 margin-bottom: 20px;
                 font-size: 16px;
             }}
-            .info-box div {{
-                margin: 5px 0;
-            }}
             .info-box strong {{
                 display: inline-block;
-                width: 240px;
+                width: 220px;
             }}
             table {{
                 border-collapse: collapse;
                 width: 100%;
                 margin-top: 20px;
-                font-size: 13.5px;
+                font-size: 14px;
             }}
             th, td {{
                 border: 1px solid #ccc;
@@ -849,21 +865,14 @@ def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seat
     """
     return html_template
 
-def export_to_pdf_and_download(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024):
-    html_content = generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024)
+html_export = export_to_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024)
+html_bytes = html_export.encode("utf-8")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp_html:
-        tmp_html.write(html_content.encode("utf-8"))
-        tmp_html_path = tmp_html.name
+st.download_button(
+    label="📥 Download Ringkasan (HTML)",
+    data=html_bytes,
+    file_name="rangkuman_kalkulasi_2029.html",
+    mime="text/html"
+)
 
-    pdf_output_path = tmp_html_path.replace(".html", ".pdf")
-    pdfkit.from_file(tmp_html_path, pdf_output_path)
-
-    with open(pdf_output_path, "rb") as f:
-        pdf_bytes = f.read()
-
-    return pdf_bytes, "rangkuman_kalkulasi_2029.pdf"
-
-# Jalankan export dan tampilkan tombol download
-pdf_bytes, pdf_filename = export_to_pdf_and_download(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024)
-st.download_button("Download PDF Ringkasan", data=pdf_bytes, file_name=pdf_filename, mime="application/pdf")
+st.caption("Setelah mengunduh file, buka di browser dan tekan Ctrl+P (atau ⌘+P di Mac) untuk menyimpan sebagai PDF.")
