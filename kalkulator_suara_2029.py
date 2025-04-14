@@ -1,5 +1,10 @@
 import streamlit as st
 import pandas as pd
+import pdfkit
+from pathlib import Path
+from jinja2 import Template
+import tempfile
+import base64
 
 # Konfigurasi halaman
 st.set_page_config(page_title="Kalkulator Kebutuhan Suara Pemilu 2029", layout="wide")
@@ -640,18 +645,18 @@ st.markdown("<br>", unsafe_allow_html=True)  # Spasi vertikal
 # === PART 5: RANGKUMAN PERHITUNGAN AKHIR ===
 st.header("5. Rangkuman Hasil Akhir Kalkulasi")
 
-# === Hitung TOTAL RAB untuk semua DAPIL (bukan hanya yang sedang tampil) ===
-if "TOTAL_RAB" not in df_terpilih.columns:
-    df_terpilih["TOTAL_RAB"] = 0
+# === Hitung TOTAL RAB untuk semua DAPIL (gunakan apply, bukan loop) ===
 
-for idx, row in df_terpilih.iterrows():
-    rab_kursi = 0
+def hitung_total_rab(row):
+    total = 0
     for i in range(1, 5):
-        sp_val = row.get(f"SP_KURSI_{i}", 0)
-        rab_val = int(sp_val * angka_psikologis)
-        if rab_val > 0:
-            rab_kursi += rab_val + biaya_manajemen + biaya_pendampingan
-    df_terpilih.at[idx, "TOTAL_RAB"] = rab_kursi
+        sp = row.get(f"SP_KURSI_{i}", 0)
+        if sp > 0:
+            rab = sp * angka_psikologis + biaya_manajemen + biaya_pendampingan
+            total += rab
+    return total
+
+df_terpilih["TOTAL_RAB"] = df_terpilih.apply(hitung_total_rab, axis=1)
 
 # Siapkan data untuk tabel rangkuman dapil potensial
 df_summary_display = df_terpilih[[
@@ -668,10 +673,10 @@ df_summary_display.columns = [
 for col in ["Suara 2024", "Target Suara 2029", "Total RAB"]:
     df_summary_display[col] = df_summary_display[col].apply(lambda x: f"{int(x):,}".replace(",", "."))
 
-# Konversi Total RAB ke integer tanpa titik untuk kalkulasi total
+# Tambahkan kolom bantu numerik untuk akumulasi RAB
 df_summary_display["TOTAL_RAB_INT"] = df_summary_display["Total RAB"].str.replace(".", "", regex=False).astype(int)
 
-# Hitung total agregat
+# Hitung ringkasan total
 total_suara_2029 = df_terpilih['TOTAL_TARGET_SUARA_2029'].sum()
 total_kursi_2029 = df_terpilih['TARGET_TAMBAHAN_KURSI'].sum()
 total_rab = df_summary_display["TOTAL_RAB_INT"].sum()
@@ -683,11 +688,10 @@ with col1:
 with col2:
     st.metric("Target Kursi 2029", int(total_kursi_2029))
 with col3:
-    total_rab = df_terpilih["TOTAL_RAB"].sum()
     st.metric("Total RAB (Rp)", f"{int(total_rab):,}".replace(",", "."))
 
 st.markdown("---")
-st.subheader("📍 Tabel Rangkuman Persebaran Dapil Potensial")
+st.subheader("Tabel Rangkuman Persebaran Dapil Potensial")
 
 # Pagination
 per_page = 10
@@ -725,4 +729,141 @@ with col_next:
         if st.button("Selanjutnya →", key="summary_next"):
             st.session_state.summary_page += 1
 
-st.caption(f"Menampilkan halaman {st.session_state.summary_page} dari {total_pages}")
+
+# === PART 6: UNDUH PDF RANGKUMAN HASIL ===
+st.markdown("### Unduh Ringkasan Hasil Kalkulasi")
+
+def generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024):
+    df = df_terpilih.copy()
+
+    df["Total RAB"] = df["TOTAL_RAB"].fillna(0).apply(format_ribuan)
+    df["Target Suara 2029"] = df["TOTAL_TARGET_SUARA_2029"].fillna(0).apply(format_ribuan)
+    df["Suara 2024"] = df["SUARA_2024"].fillna(0).apply(format_ribuan)
+    df["Target Kursi 2029"] = df["TARGET_TAMBAHAN_KURSI"].fillna(0).astype(int)
+
+    # Gabungkan kolom GUGUSAN & PROPINSI dari sheet dapil
+    df = df.merge(df_dapil[["DAPIL", "GUGUSAN", "PROPINSI"]], on="DAPIL", how="left")
+
+    total_suara = format_ribuan(df["TOTAL_TARGET_SUARA_2029"].sum())
+    total_kursi = int(df["TARGET_TAMBAHAN_KURSI"].sum())
+    total_rab = format_ribuan(df["TOTAL_RAB"].sum())
+    suara_2024 = format_ribuan(votes_2024)
+    kursi_2024 = format_ribuan(seats_2024)
+
+    rows_html = ""
+    for _, group_df in df.groupby(["GUGUSAN", "PROPINSI"]):
+        prop = group_df["PROPINSI"].iloc[0]
+        rows_html += f"<tr><th colspan='7' class='propinsi-header'>{prop}</th></tr>"
+        for _, row in group_df.iterrows():
+            rows_html += f"""
+            <tr>
+                <td>{row['DAPIL']}</td>
+                <td>{row['ALOKASI_KURSI']}</td>
+                <td>{row['KURSI_2024']}</td>
+                <td>{row['Target Kursi 2029']}</td>
+                <td style='text-align:right'>{row['Suara 2024']}</td>
+                <td style='text-align:right'>{row['Target Suara 2029']}</td>
+                <td style='text-align:right'>{row['Total RAB']}</td>
+            </tr>
+            """
+
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Rangkuman Kalkulasi Pemilu 2029</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', sans-serif;
+                padding: 40px;
+                color: #222;
+            }}
+            h1 {{
+                font-size: 24px;
+                color: #0b3d91;
+            }}
+            .info-box {{
+                margin-bottom: 20px;
+                font-size: 16px;
+            }}
+            .info-box div {{
+                margin: 5px 0;
+            }}
+            .info-box strong {{
+                display: inline-block;
+                width: 240px;
+            }}
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+                margin-top: 20px;
+                font-size: 13.5px;
+            }}
+            th, td {{
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: center;
+            }}
+            th {{
+                background-color: #1f1f1f;
+                color: white;
+            }}
+            .propinsi-header {{
+                background-color: #f1f1f1;
+                color: #222;
+                text-align: left;
+                font-weight: bold;
+                padding-left: 12px;
+            }}
+            tr:hover td {{
+                background-color: #f9f9f9;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>Rangkuman Hasil Akhir Kalkulasi Pemilu 2029</h1>
+        <div class="info-box">
+            <div><strong>Partai:</strong> {selected_party}</div>
+            <div><strong>Perolehan Suara 2024:</strong> {suara_2024}</div>
+            <div><strong>Perolehan Kursi 2024:</strong> {kursi_2024}</div>
+            <div><strong>Total Target Suara 2029:</strong> {total_suara}</div>
+            <div><strong>Total Target Kursi 2029:</strong> {total_kursi}</div>
+            <div><strong>Total RAB (Rp):</strong> {total_rab}</div>
+        </div>
+        <h2>Persebaran Dapil Potensial</h2>
+        <table>
+            <tr>
+                <th>Dapil</th>
+                <th>Alokasi Kursi</th>
+                <th>Kursi 2024</th>
+                <th>Target Kursi 2029</th>
+                <th>Suara 2024</th>
+                <th>Target Suara 2029</th>
+                <th>Total RAB</th>
+            </tr>
+            {rows_html}
+        </table>
+    </body>
+    </html>
+    """
+    return html_template
+
+def export_to_pdf_and_download(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024):
+    html_content = generate_export_html(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp_html:
+        tmp_html.write(html_content.encode("utf-8"))
+        tmp_html_path = tmp_html.name
+
+    pdf_output_path = tmp_html_path.replace(".html", ".pdf")
+    pdfkit.from_file(tmp_html_path, pdf_output_path)
+
+    with open(pdf_output_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    return pdf_bytes, "rangkuman_kalkulasi_2029.pdf"
+
+# Jalankan export dan tampilkan tombol download
+pdf_bytes, pdf_filename = export_to_pdf_and_download(df_terpilih, df_dapil, selected_party, votes_2024, seats_2024)
+st.download_button("Download PDF Ringkasan", data=pdf_bytes, file_name=pdf_filename, mime="application/pdf")
