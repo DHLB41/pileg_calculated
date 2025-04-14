@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import pdfkit
 from pathlib import Path
 from jinja2 import Template
 import tempfile
